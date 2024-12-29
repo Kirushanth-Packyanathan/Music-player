@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AntDesign, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
@@ -9,32 +9,126 @@ const { width } = Dimensions.get('window');
 const PlayerScreen = ({ route, navigation }) => {
   const { playlist } = route.params;
   const [currentTrack, setCurrentTrack] = useState(null);
+  const [tracks, setTracks] = useState([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
-
-  useEffect(() => {
-    fetchFirstTrack();
-  }, []);
-
-  const fetchFirstTrack = async () => {
+  const [duration, setDuration] = useState(0);
+  const [shuffleMode, setShuffleMode] = useState(false);
+  const [repeatMode, setRepeatMode] = useState('off');
+  
+  // Fetch tracks from playlist
+  const fetchTracks = async () => {
     try {
       const token = await AsyncStorage.getItem('spotifyToken');
       const response = await fetch(`https://api.spotify.com/v1/playlists/${playlist.id}/tracks`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` }
       });
       const data = await response.json();
-      if (data.items.length > 0) {
+      if (data.items) {
+        setTracks(data.items);
         setCurrentTrack(data.items[0].track);
+        setDuration(data.items[0].track.duration_ms);
       }
     } catch (error) {
-      console.error('Error fetching tracks:', error);
+      Alert.alert('Error', 'Failed to fetch tracks');
     }
   };
 
-  const togglePlayback = () => {
-    setIsPlaying(!isPlaying);
+  // Control playback state
+  const handlePlayback = async () => {
+    try {
+      const token = await AsyncStorage.getItem('spotifyToken');
+      const endpoint = `https://api.spotify.com/v1/me/player/${isPlaying ? 'pause' : 'play'}`;
+      
+      await fetch(endpoint, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          uris: [currentTrack.uri]
+        })
+      });
+      
+      setIsPlaying(!isPlaying);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to control playback');
+    }
+  };
+
+  // Handle track changes
+  const changeTrack = async (direction) => {
+    let newIndex = direction === 'next' 
+      ? (currentIndex + 1) % tracks.length 
+      : (currentIndex - 1 + tracks.length) % tracks.length;
+    
+    if (shuffleMode) {
+      newIndex = Math.floor(Math.random() * tracks.length);
+    }
+
+    setCurrentIndex(newIndex);
+    setCurrentTrack(tracks[newIndex].track);
+    setDuration(tracks[newIndex].track.duration_ms);
+    setProgress(0);
+    
+    if (isPlaying) {
+      await handlePlayback();
+    }
+  };
+
+  // Update progress
+  useEffect(() => {
+    let progressInterval;
+    if (isPlaying) {
+      progressInterval = setInterval(() => {
+        setProgress((prevProgress) => {
+          const newProgress = prevProgress + 1000;
+          if (newProgress >= duration) {
+            if (repeatMode === 'track') {
+              return 0;
+            } else if (repeatMode === 'off') {
+              changeTrack('next');
+            }
+          }
+          return newProgress;
+        });
+      }, 1000);
+    }
+    return () => clearInterval(progressInterval);
+  }, [isPlaying, duration, repeatMode]);
+
+  // Initial setup
+  useEffect(() => {
+    fetchTracks();
+  }, []);
+
+  // Format time
+  const formatTime = (ms) => {
+    const minutes = Math.floor(ms / 60000);
+    const seconds = Math.floor((ms % 60000) / 1000);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  // Handle seek
+  const handleSeek = async (value) => {
+    try {
+      const token = await AsyncStorage.getItem('spotifyToken');
+      const position = Math.floor(value * duration);
+      
+      await fetch('https://api.spotify.com/v1/me/player/seek', {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ position_ms: position })
+      });
+      
+      setProgress(position);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to seek');
+    }
   };
 
   if (!currentTrack) {
@@ -47,6 +141,7 @@ const PlayerScreen = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <AntDesign name="down" size={24} color="#FFF" />
@@ -57,6 +152,7 @@ const PlayerScreen = ({ route, navigation }) => {
         </TouchableOpacity>
       </View>
 
+      {/* Artwork */}
       <View style={styles.artworkContainer}>
         <Image
           source={{ uri: currentTrack.album.images[0].url }}
@@ -64,15 +160,18 @@ const PlayerScreen = ({ route, navigation }) => {
         />
       </View>
 
+      {/* Track Info */}
       <View style={styles.infoContainer}>
         <Text style={styles.trackTitle}>{currentTrack.name}</Text>
         <Text style={styles.artistName}>{currentTrack.artists[0].name}</Text>
       </View>
 
+      {/* Progress Bar */}
       <View style={styles.progressContainer}>
         <Slider
           style={styles.progressBar}
-          value={progress}
+          value={progress / duration}
+          onSlidingComplete={handleSeek}
           minimumValue={0}
           maximumValue={1}
           thumbTintColor="#1DB954"
@@ -80,40 +179,55 @@ const PlayerScreen = ({ route, navigation }) => {
           maximumTrackTintColor="#555"
         />
         <View style={styles.timeContainer}>
-          <Text style={styles.timeText}>0:00</Text>
-          <Text style={styles.timeText}>3:45</Text>
+          <Text style={styles.timeText}>{formatTime(progress)}</Text>
+          <Text style={styles.timeText}>{formatTime(duration)}</Text>
         </View>
       </View>
 
+      {/* Controls */}
       <View style={styles.controls}>
-        <TouchableOpacity style={styles.secondaryControl}>
-          <Ionicons name="shuffle" size={24} color="#FFF" />
+        <TouchableOpacity 
+          style={[styles.secondaryControl, shuffleMode && styles.activeControl]}
+          onPress={() => setShuffleMode(!shuffleMode)}
+        >
+          <Ionicons name="shuffle" size={24} color={shuffleMode ? "#1DB954" : "#FFF"} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.mainControl}>
+        
+        <TouchableOpacity 
+          style={styles.mainControl}
+          onPress={() => changeTrack('prev')}
+        >
           <AntDesign name="stepbackward" size={24} color="#FFF" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.playPauseButton} onPress={togglePlayback}>
-          <AntDesign name={isPlaying ? "pausecircle" : "playcircle"} size={64} color="#1DB954" />
+        
+        <TouchableOpacity 
+          style={styles.playPauseButton}
+          onPress={handlePlayback}
+        >
+          <AntDesign 
+            name={isPlaying ? "pausecircleo" : "playcircleo"}
+            size={64}
+            color="#1DB954"
+          />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.mainControl}>
+        
+        <TouchableOpacity 
+          style={styles.mainControl}
+          onPress={() => changeTrack('next')}
+        >
           <AntDesign name="stepforward" size={24} color="#FFF" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryControl}>
-          <Ionicons name="repeat" size={24} color="#FFF" />
+        
+        <TouchableOpacity 
+          style={[styles.secondaryControl, repeatMode !== 'off' && styles.activeControl]}
+          onPress={() => setRepeatMode(repeatMode === 'off' ? 'track' : repeatMode === 'track' ? 'context' : 'off')}
+        >
+          <Ionicons 
+            name={repeatMode === 'track' ? "repeat-once" : "repeat"}
+            size={24}
+            color={repeatMode !== 'off' ? "#1DB954" : "#FFF"}
+          />
         </TouchableOpacity>
-      </View>
-
-      <View style={styles.volumeContainer}>
-        <Ionicons name="volume-low" size={20} color="#FFF" />
-        <Slider
-          style={styles.volumeSlider}
-          minimumValue={0}
-          maximumValue={1}
-          thumbTintColor="#1DB954"
-          minimumTrackTintColor="#1DB954"
-          maximumTrackTintColor="#555"
-        />
-        <Ionicons name="volume-high" size={20} color="#FFF" />
       </View>
     </View>
   );
