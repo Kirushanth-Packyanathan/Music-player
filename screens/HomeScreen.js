@@ -7,60 +7,166 @@ import {
   StyleSheet,
   Image,
   Dimensions,
-  ActivityIndicator 
+  ActivityIndicator,
+  TextInput,
+  Alert 
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
 
 const HomeScreen = ({ navigation }) => {
   const [playlists, setPlaylists] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [searchResults, setSearchResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchPlaylists();
-  }, []);
+  const handleApiError = (error) => {
+    if (error.message.includes('403')) {
+      Alert.alert(
+        'Authentication Error',
+        'Please log in again',
+        [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
+      );
+    } else {
+      setError('Failed to load content');
+    }
+    setLoading(false);
+  };
 
-  const fetchPlaylists = async () => {
+  const searchPlaylists = async (query) => {
+    if (!query.trim()) {
+      setSearchResults(playlists);
+      return;
+    }
+
+    setLoading(true);
     try {
       const token = await AsyncStorage.getItem('spotifyToken');
-      const response = await fetch('https://api.spotify.com/v1/me/playlists', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      if (!token) throw new Error('No token found');
+
+      const response = await fetch(
+        `https://api.spotify.com/v1/search?q=${encodeURIComponent(query)}&type=playlist&limit=20`,
+        {
+          headers: { Authorization: `Bearer ${token}` }
+        }
+      );
+
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      
       const data = await response.json();
-      setPlaylists(data.items);
+      if (data.playlists?.items) {
+        setSearchResults(data.playlists.items);
+        setError(null);
+      }
     } catch (error) {
-      console.error('Error fetching playlists:', error);
+      handleApiError(error);
     } finally {
       setLoading(false);
     }
   };
 
-  const renderItem = ({ item }) => (
-    <TouchableOpacity
-      style={styles.playlistCard}
-      onPress={() => navigation.navigate('Player', { playlist: item })}
-    >
-      <Image
-        source={{ uri: item.images[0]?.url }}
-        style={styles.playlistImage}
+  const fetchUserPlaylists = async () => {
+    setLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('spotifyToken');
+      if (!token) throw new Error('No token found');
+
+      const response = await fetch('https://api.spotify.com/v1/me/playlists', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+
+      const data = await response.json();
+      if (data.items) {
+        setPlaylists(data.items);
+        setSearchResults(data.items);
+        setError(null);
+      }
+    } catch (error) {
+      handleApiError(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchUserPlaylists();
+  }, []);
+
+  const handleSearch = (text) => {
+    setSearchQuery(text);
+    searchPlaylists(text);
+  };
+
+  const renderSearchBar = () => (
+    <View style={styles.searchContainer}>
+      <Ionicons name="search" size={20} color="#B3B3B3" />
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Search playlists"
+        placeholderTextColor="#B3B3B3"
+        value={searchQuery}
+        onChangeText={handleSearch}
+        autoCapitalize="none"
       />
-      <View style={styles.playlistInfo}>
-        <Text style={styles.playlistName}>{item.name}</Text>
-        <View style={styles.playlistDetails}>
-          <Text style={styles.playlistTracks}>{item.tracks.total} tracks</Text>
-          <MaterialIcons name="play-circle-filled" size={32} color="#1DB954" />
-        </View>
-      </View>
-    </TouchableOpacity>
+      {searchQuery.length > 0 && (
+        <TouchableOpacity 
+          onPress={() => {
+            setSearchQuery('');
+            setSearchResults(playlists);
+          }}
+        >
+          <Ionicons name="close-circle" size={20} color="#B3B3B3" />
+        </TouchableOpacity>
+      )}
+    </View>
   );
 
-  if (loading) {
+  const renderItem = ({ item }) => {
+    if (!item) return null;
+    
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1DB954" />
+      <TouchableOpacity
+        style={styles.playlistCard}
+        onPress={() => navigation.navigate('Player', { playlist: item })}
+      >
+        <Image
+          source={{ uri: item.images?.[0]?.url }}
+          style={styles.playlistImage}
+          defaultSource={require('../assets/icon.png')}
+        />
+        <View style={styles.playlistInfo}>
+          <Text style={styles.playlistName}>{item.name}</Text>
+          <View style={styles.playlistDetails}>
+            <Text style={styles.playlistTracks}>
+              {item.tracks?.total || 0} tracks
+            </Text>
+            <MaterialIcons 
+              name="play-circle-filled" 
+              size={32} 
+              color="#1DB954" 
+            />
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  if (error) {
+    return (
+      <View style={styles.errorContainer}>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity 
+          style={styles.retryButton} 
+          onPress={fetchUserPlaylists}
+        >
+          <Text style={styles.retryText}>Retry</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -72,18 +178,36 @@ const HomeScreen = ({ navigation }) => {
     >
       <View style={styles.headerContainer}>
         <Text style={styles.headerTitle}>Your Library</Text>
-        <TouchableOpacity style={styles.refreshButton}>
+        <TouchableOpacity 
+          style={styles.refreshButton}
+          onPress={fetchUserPlaylists}
+        >
           <MaterialIcons name="refresh" size={24} color="#FFF" />
         </TouchableOpacity>
       </View>
-      <FlatList
-        data={playlists}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id}
-        style={styles.list}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      />
+
+      {renderSearchBar()}
+
+      {loading ? (
+        <ActivityIndicator 
+          style={styles.loader} 
+          size="large" 
+          color="#1DB954" 
+        />
+      ) : searchResults.length > 0 ? (
+        <FlatList
+          data={searchResults}
+          renderItem={renderItem}
+          keyExtractor={item => item?.id || Math.random().toString()}
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      ) : (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No playlists found</Text>
+        </View>
+      )}
     </LinearGradient>
   );
 };
@@ -91,12 +215,6 @@ const HomeScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#121212',
   },
   headerContainer: {
     flexDirection: 'row',
@@ -112,8 +230,25 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     letterSpacing: -0.5,
   },
-  refreshButton: {
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#282828',
+    margin: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 16,
+    marginLeft: 8,
+    marginRight: 8,
     padding: 8,
+  },
+  loader: {
+    marginTop: 20,
   },
   list: {
     flex: 1,
@@ -127,14 +262,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 16,
     overflow: 'hidden',
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
   playlistImage: {
     width: 80,
@@ -159,6 +286,40 @@ const styles = StyleSheet.create({
   playlistTracks: {
     fontSize: 14,
     color: '#B3B3B3',
+  },
+  refreshButton: {
+    padding: 8,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#121212',
+  },
+  errorText: {
+    color: '#FF4444',
+    fontSize: 16,
+    marginBottom: 16,
+  },
+  retryButton: {
+    backgroundColor: '#1DB954',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+  },
+  retryText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyText: {
+    color: '#B3B3B3',
+    fontSize: 16,
   }
 });
 
