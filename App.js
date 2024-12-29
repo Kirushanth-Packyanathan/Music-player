@@ -22,18 +22,16 @@ const App = () => {
   const checkToken = async () => {
     try {
       const storedToken = await AsyncStorage.getItem('spotifyToken');
-      if (storedToken) {
-        setToken(storedToken);
-      }
+      setToken(storedToken);
     } catch (error) {
-      console.error('Error checking token:', error);
+      console.error(error);
     } finally {
       setIsLoading(false);
     }
   };
 
   if (isLoading) {
-    return null; // Or a loading component
+    return null;
   }
   
 

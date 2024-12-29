@@ -24,6 +24,18 @@ const HomeScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState(null);
 
+  const handleLogout = async () => {
+    try {
+      await AsyncStorage.removeItem('spotifyToken');
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to logout');
+    }
+  };
+
   const handleApiError = (error) => {
     if (error.message.includes('403')) {
       Alert.alert(
@@ -178,12 +190,20 @@ const HomeScreen = ({ navigation }) => {
     >
       <View style={styles.headerContainer}>
         <Text style={styles.headerTitle}>Your Library</Text>
-        <TouchableOpacity 
-          style={styles.refreshButton}
-          onPress={fetchUserPlaylists}
-        >
-          <MaterialIcons name="refresh" size={24} color="#FFF" />
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity 
+            style={styles.refreshButton}
+            onPress={fetchUserPlaylists}
+          >
+            <MaterialIcons name="refresh" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.logoutButton}
+            onPress={handleLogout}
+          >
+            <MaterialIcons name="logout" size={24} color="#FFF" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {renderSearchBar()}
@@ -224,11 +244,22 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     paddingBottom: 20,
   },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   headerTitle: {
     fontSize: 34,
     fontWeight: 'bold',
     color: '#FFFFFF',
     letterSpacing: -0.5,
+  },
+  refreshButton: {
+    padding: 8,
+    marginRight: 8,
+  },
+  logoutButton: {
+    padding: 8,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -286,9 +317,6 @@ const styles = StyleSheet.create({
   playlistTracks: {
     fontSize: 14,
     color: '#B3B3B3',
-  },
-  refreshButton: {
-    padding: 8,
   },
   errorContainer: {
     flex: 1,

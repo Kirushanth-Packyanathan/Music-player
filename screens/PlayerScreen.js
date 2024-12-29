@@ -1,8 +1,23 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, Image, TouchableOpacity, StyleSheet, Dimensions, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  View, 
+  Text, 
+  Image, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Dimensions, 
+  Alert,
+  Modal,
+  ScrollView,
+  Share,
+  ActivityIndicator,
+  Animated
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AntDesign, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import Slider from '@react-native-community/slider';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 
 const { width } = Dimensions.get('window');
 
@@ -16,7 +31,199 @@ const PlayerScreen = ({ route, navigation }) => {
   const [duration, setDuration] = useState(0);
   const [shuffleMode, setShuffleMode] = useState(false);
   const [repeatMode, setRepeatMode] = useState('off');
+  const [showQueue, setShowQueue] = useState(false);
+  const [showLyrics, setShowLyrics] = useState(false);
+  const [lyrics, setLyrics] = useState(null);
+  const [lyricsLoading, setLyricsLoading] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [showTrackInfo, setShowTrackInfo] = useState(false);
   
+  // Animations
+  const artworkScale = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Fetch lyrics
+  const fetchLyrics = async () => {
+    if (!currentTrack) return;
+    setLyricsLoading(true);
+    try {
+      const response = await fetch(
+        `https://api.lyrics.ovh/v1/${encodeURIComponent(currentTrack.artists[0].name)}/${encodeURIComponent(currentTrack.name)}`
+      );
+      const data = await response.json();
+      setLyrics(data.lyrics || 'No lyrics found');
+    } catch (error) {
+      setLyrics('No lyrics available');
+    } finally {
+      setLyricsLoading(false);
+    }
+  };
+
+  // Share track
+  const shareTrack = async () => {
+    try {
+      await Share.share({
+        message: `Check out ${currentTrack.name} by ${currentTrack.artists[0].name}`,
+        url: currentTrack.external_urls.spotify
+      });
+    } catch (error) {
+      Alert.alert('Error', 'Failed to share track');
+    }
+  };
+
+  // Toggle favorite
+  const toggleFavorite = async () => {
+    try {
+      const favorites = await AsyncStorage.getItem('favoriteTracks') || '[]';
+      const favList = JSON.parse(favorites);
+      
+      if (isFavorite) {
+        const newFavs = favList.filter(id => id !== currentTrack.id);
+        await AsyncStorage.setItem('favoriteTracks', JSON.stringify(newFavs));
+      } else {
+        favList.push(currentTrack.id);
+        await AsyncStorage.setItem('favoriteTracks', JSON.stringify(favList));
+      }
+      
+      setIsFavorite(!isFavorite);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update favorites');
+    }
+  };
+
+  // Check if track is favorite
+  useEffect(() => {
+    const checkFavorite = async () => {
+      try {
+        const favorites = await AsyncStorage.getItem('favoriteTracks');
+        if (favorites && currentTrack) {
+          const favList = JSON.parse(favorites);
+          setIsFavorite(favList.includes(currentTrack.id));
+        }
+      } catch (error) {
+        console.error('Error checking favorites:', error);
+      }
+    };
+    checkFavorite();
+  }, [currentTrack]);
+
+  // Artwork animation
+  useEffect(() => {
+    if (isPlaying) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(artworkScale, {
+            toValue: 1.05,
+            duration: 2000,
+            useNativeDriver: true
+          }),
+          Animated.timing(artworkScale, {
+            toValue: 1,
+            duration: 2000,
+            useNativeDriver: true
+          })
+        ])
+      ).start();
+    } else {
+      Animated.spring(artworkScale, {
+        toValue: 1,
+        useNativeDriver: true
+      }).start();
+    }
+  }, [isPlaying]);
+
+  // Queue Modal
+  const QueueModal = () => (
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={showQueue}
+      onRequestClose={() => setShowQueue(false)}
+    >
+      <LinearGradient
+        colors={['#121212', '#191414']}
+        style={styles.modalContainer}
+      >
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>Queue</Text>
+          <TouchableOpacity onPress={() => setShowQueue(false)}>
+            <AntDesign name="close" size={24} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+        <ScrollView style={styles.queueList}>
+          {tracks.map((item, index) => (
+            <TouchableOpacity
+              key={item.track.id}
+              style={[
+                styles.queueItem,
+                currentIndex === index && styles.activeQueueItem
+              ]}
+              onPress={() => {
+                setCurrentIndex(index);
+                setCurrentTrack(item.track);
+                setDuration(item.track.duration_ms);
+                setProgress(0);
+                setShowQueue(false);
+              }}
+            >
+              <Image
+                source={{ uri: item.track.album.images[0].url }}
+                style={styles.queueItemImage}
+              />
+              <View style={styles.queueItemInfo}>
+                <Text style={styles.queueItemTitle}>
+                  {item.track.name}
+                </Text>
+                <Text style={styles.queueItemArtist}>
+                  {item.track.artists[0].name}
+                </Text>
+              </View>
+              {currentIndex === index && (
+                <MaterialIcons 
+                  name="play-circle-filled" 
+                  size={24} 
+                  color="#1DB954" 
+                />
+              )}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </LinearGradient>
+    </Modal>
+  );
+
+  // Lyrics Modal
+  const LyricsModal = () => (
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={showLyrics}
+      onRequestClose={() => setShowLyrics(false)}
+    >
+      <LinearGradient
+        colors={['#121212', '#191414']}
+        style={styles.modalContainer}
+      >
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>Lyrics</Text>
+          <TouchableOpacity onPress={() => setShowLyrics(false)}>
+            <AntDesign name="close" size={24} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+        <ScrollView style={styles.lyricsContainer}>
+          {lyricsLoading ? (
+            <ActivityIndicator size="large" color="#1DB954" />
+          ) : (
+            <Text style={styles.lyricsText}>{lyrics}</Text>
+          )}
+        </ScrollView>
+      </LinearGradient>
+    </Modal>
+  );
+
+
   // Fetch tracks from playlist
   const fetchTracks = async () => {
     try {
@@ -141,24 +348,46 @@ const PlayerScreen = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
+      {QueueModal()}
+      {LyricsModal()}
+
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <AntDesign name="down" size={24} color="#FFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Now Playing</Text>
-        <TouchableOpacity>
-          <MaterialIcons name="playlist-play" size={24} color="#FFF" />
-        </TouchableOpacity>
+        <View style={styles.headerControls}>
+          <TouchableOpacity onPress={toggleFavorite}>
+            <AntDesign 
+              name={isFavorite ? "heart" : "hearto"} 
+              size={24} 
+              color={isFavorite ? "#1DB954" : "#FFF"} 
+            />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.headerButton} 
+            onPress={() => {
+              setShowQueue(true);
+            }}
+          >
+            <MaterialIcons name="queue-music" size={24} color="#FFF" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Artwork */}
-      <View style={styles.artworkContainer}>
+      <Animated.View 
+        style={[
+          styles.artworkContainer,
+          { transform: [{ scale: artworkScale }] }
+        ]}
+      >
         <Image
-          source={{ uri: currentTrack.album.images[0].url }}
+          source={{ uri: currentTrack?.album.images[0].url }}
           style={styles.artwork}
         />
-      </View>
+      </Animated.View>
 
       {/* Track Info */}
       <View style={styles.infoContainer}>
@@ -327,6 +556,72 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 16,
     textAlign: 'center',
+  },
+  modalContainer: {
+    flex: 1,
+    marginTop: 60,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#333',
+  },
+  modalTitle: {
+    color: '#FFF',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  queueList: {
+    flex: 1,
+  },
+  queueItem: {
+    flexDirection: 'row',
+    padding: 12,
+    alignItems: 'center',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#333',
+  },
+  activeQueueItem: {
+    backgroundColor: 'rgba(29, 185, 84, 0.1)',
+  },
+  queueItemImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 4,
+  },
+  queueItemInfo: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  queueItemTitle: {
+    color: '#FFF',
+    fontSize: 16,
+  },
+  queueItemArtist: {
+    color: '#B3B3B3',
+    fontSize: 14,
+  },
+  headerControls: {
+    flexDirection: 'row',
+    width: 80,
+    justifyContent: 'space-between',
+  },
+  headerButton: {
+    marginLeft: 15,
+  },
+  lyricsContainer: {
+    flex: 1,
+    padding: 20,
+  },
+  lyricsText: {
+    color: '#FFF',
+    fontSize: 16,
+    lineHeight: 24,
   }
 });
 
