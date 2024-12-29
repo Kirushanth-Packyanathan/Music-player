@@ -188,6 +188,7 @@ const PlayerScreen = ({ route, navigation }) => {
                 />
               )}
             </TouchableOpacity>
+            
           ))}
         </ScrollView>
       </LinearGradient>
@@ -348,9 +349,6 @@ const PlayerScreen = ({ route, navigation }) => {
 
   return (
     <View style={styles.container}>
-      {QueueModal()}
-      {LyricsModal()}
-
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -365,36 +363,34 @@ const PlayerScreen = ({ route, navigation }) => {
               color={isFavorite ? "#1DB954" : "#FFF"} 
             />
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.headerButton} 
-            onPress={() => {
-              setShowQueue(true);
-            }}
-          >
+          <TouchableOpacity onPress={() => setShowQueue(true)}>
             <MaterialIcons name="queue-music" size={24} color="#FFF" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => {
+            setShowLyrics(true);
+            if (!lyrics) fetchLyrics();
+          }}>
+            <MaterialIcons name="lyrics" size={24} color="#FFF" />
           </TouchableOpacity>
         </View>
       </View>
-
+  
       {/* Artwork */}
       <Animated.View 
-        style={[
-          styles.artworkContainer,
-          { transform: [{ scale: artworkScale }] }
-        ]}
+        style={[styles.artworkContainer, { transform: [{ scale: artworkScale }] }]}
       >
         <Image
           source={{ uri: currentTrack?.album.images[0].url }}
           style={styles.artwork}
         />
       </Animated.View>
-
+  
       {/* Track Info */}
       <View style={styles.infoContainer}>
-        <Text style={styles.trackTitle}>{currentTrack.name}</Text>
-        <Text style={styles.artistName}>{currentTrack.artists[0].name}</Text>
+        <Text style={styles.trackTitle}>{currentTrack?.name}</Text>
+        <Text style={styles.artistName}>{currentTrack?.artists[0].name}</Text>
       </View>
-
+  
       {/* Progress Bar */}
       <View style={styles.progressContainer}>
         <Slider
@@ -412,14 +408,18 @@ const PlayerScreen = ({ route, navigation }) => {
           <Text style={styles.timeText}>{formatTime(duration)}</Text>
         </View>
       </View>
-
+  
       {/* Controls */}
       <View style={styles.controls}>
         <TouchableOpacity 
           style={[styles.secondaryControl, shuffleMode && styles.activeControl]}
           onPress={() => setShuffleMode(!shuffleMode)}
         >
-          <Ionicons name="shuffle" size={24} color={shuffleMode ? "#1DB954" : "#FFF"} />
+          <Ionicons 
+            name="shuffle" 
+            size={24} 
+            color={shuffleMode ? "#1DB954" : "#FFF"} 
+          />
         </TouchableOpacity>
         
         <TouchableOpacity 
@@ -458,6 +458,10 @@ const PlayerScreen = ({ route, navigation }) => {
           />
         </TouchableOpacity>
       </View>
+  
+      {/* Modals */}
+      {QueueModal()}
+      {LyricsModal()}
     </View>
   );
 };
@@ -479,6 +483,11 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 16,
     fontWeight: '600',
+  },
+  headerControls: {
+    flexDirection: 'row',
+    width: 120,
+    justifyContent: 'space-between',
   },
   artworkContainer: {
     alignItems: 'center',
@@ -543,23 +552,13 @@ const styles = StyleSheet.create({
   playPauseButton: {
     transform: [{ scale: 1.2 }],
   },
-  volumeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  volumeSlider: {
-    flex: 1,
-    marginHorizontal: 10,
-  },
-  loadingText: {
-    color: '#FFF',
-    fontSize: 16,
-    textAlign: 'center',
+  activeControl: {
+    opacity: 1,
   },
   modalContainer: {
     flex: 1,
     marginTop: 60,
+    backgroundColor: '#121212',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
   },
@@ -606,14 +605,6 @@ const styles = StyleSheet.create({
     color: '#B3B3B3',
     fontSize: 14,
   },
-  headerControls: {
-    flexDirection: 'row',
-    width: 80,
-    justifyContent: 'space-between',
-  },
-  headerButton: {
-    marginLeft: 15,
-  },
   lyricsContainer: {
     flex: 1,
     padding: 20,
@@ -622,6 +613,22 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 16,
     lineHeight: 24,
+    textAlign: 'center',
+  },
+  loadingText: {
+    color: '#FFF',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  volumeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    paddingHorizontal: 20,
+  },
+  volumeSlider: {
+    flex: 1,
+    marginHorizontal: 10,
   }
 });
 
